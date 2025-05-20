@@ -1,32 +1,80 @@
 # GASAttributeGenerator
 
-Hello and welcome to something I crafted to help myself generate GAS attributes. Hopefully it will help you. Its super straight forward. 
+Welcome to **GASAttributeGenerator** — a tool I created to speed up the process of generating Gameplay Ability System (GAS) attribute sets in Unreal Engine. If you're working with GAS and find yourself repeatedly writing boilerplate code for attributes, this tool is here to help.
 
-WARNING: You do need python to run this as its a python script. 
+> ⚠️ **Note:** You need **Python** installed to run this script.
 
-Open up the file and you will be presented with a few fields to fill out.
+---
 
-In the left pane, put all your attributes you wish to replicate e.g.
+## 🚀 Features
 
-Health
-MaxHealth
-Mana
-MaxMana
+- GUI-based attribute generation using **Tkinter**
+- Supports both **replicated** and **non-replicated** attributes
+- Automatically generates clean, uniform C++ code for your `AttributeSet` classes
+- Supports custom class names, API macros, and base classes
+- Optional settings saving
 
-Put it in this format - one line for each attribute.
+---
 
-In the right pane, put all your non-replicated attributes e.g.
+## 🛠 How to Use
 
-Damage
-VoicelinePitch
-HairLength
+1. **Run the Python Script**  
+   Open the script using Python. A simple GUI will appear.
 
-You then specify your API. This usually is your (your project name here)_API. For example: MYGAME_API
+2. **Enter Your Attributes**  
+   - **Replicated Attributes (Left Pane):**  
+     Add each attribute you wish to replicate on its own line, e.g.:
+     ```
+     Health
+     MaxHealth
+     Mana
+     MaxMana
+     ```
 
-The next field is your AttributeSet Class Name. So this can be custom. For example: MyCharacterSet or EnemySet. Its not manditory to have Set at the end, but its good practise to keep everything uniform.
+   - **Non-Replicated Attributes (Right Pane):**  
+     Add each non-replicated attribute on its own line, e.g.:
+     ```
+     Damage
+     VoicelinePitch
+     HairLength
+     ```
 
-The Base Class feild is the parent class. So unless you have made your own AttributeSet class you which to dirive from, just keep Base Class as AttributeSet
+3. **Set Your Configuration:**
+   - **API Macro:**  
+     Typically your project’s API macro, e.g. `MYGAME_API`.
+   - **AttributeSet Class Name:**  
+     Custom class name for your new `AttributeSet`, e.g. `MyCharacterSet` or `EnemySet`.  
+     (It’s not required to end with "Set", but it's good practice.)
+   - **Base Class:**  
+     The parent class to inherit from. Use `AttributeSet` unless you have a custom one.
 
-You can save your settings if you wish.
+4. **Save Settings (Optional)**  
+   If you'd like to reuse your configuration later.
 
-Once you have done that, hit generate files! You now have your very own AttributeSet in C++ (You still have to install them/compile them into your project though)
+5. **Generate Files**  
+   Click the **Generate Files** button. Your new `AttributeSet` C++ files will be generated.
+
+> 💡 Don't forget to include and compile the generated files in your Unreal Engine project.
+
+---
+
+## 📁 Output
+
+The tool generates clean and structured `.h` and `.cpp` files with full support for replication (where applicable), getters/setters, and Unreal macros.
+
+---
+
+## 🧩 Requirements
+
+- Python 3.x
+- Tkinter (usually included with standard Python installations)
+
+---
+
+## 📬 Feedback
+
+If you encounter bugs or have suggestions for improvement, feel free to open an issue or a pull request. I built this for myself, but I hope it helps others in the Unreal community too!
+
+---
+
+Happy developing! 🎮
