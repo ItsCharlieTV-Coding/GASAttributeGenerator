@@ -1,4 +1,4 @@
-# GASAttributeGenerator
+# Python-based GASAttributeGenerator
 
 Welcome to **GASAttributeGenerator** — a tool I created to speed up the process of generating Gameplay Ability System (GAS) attribute sets in Unreal Engine. If you're working with GAS and find yourself repeatedly writing boilerplate code for attributes, this tool is here to help.
 
