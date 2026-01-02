@@ -8,6 +8,9 @@ def to_identifier(name):
     return ''.join(c if c.isalnum() else '_' for c in name)
 
 def generate_code(attributes, replicated, api_macro, class_name, base_class):
+    def to_identifier_local(name):
+        return ''.join(c if c.isalnum() else '_' for c in name)
+
     class_name_u = f"U{class_name}"
     header_file = f"{class_name}.h"
     cpp_file = f"{class_name}.cpp"
@@ -15,88 +18,169 @@ def generate_code(attributes, replicated, api_macro, class_name, base_class):
     base_class_u = base_class if base_class.startswith('U') else f"U{base_class}"
     include_name = base_class[1:] if base_class.startswith('U') else base_class
 
-    header = f'''#pragma once
+    enum_values = [to_identifier_local(attr) for attr in attributes]
 
-#include "CoreMinimal.h"
-#include "{include_name}.h"
-#include "AbilitySystemComponent.h"
-#include "GameplayEffectExtension.h"
-#include "{class_name}.generated.h"
+    enum_code = "UENUM(BlueprintType)\nenum class AllAttributesEnum : uint8\n{\n"
+    for value in enum_values:
+        enum_code += f"    {value} UMETA(DisplayName = \"{value}\"),\n"
+    enum_code += "    None UMETA(Hidden)\n};\n\n"
 
-#define ATTRIBUTE_ACCESSORS(ClassName, PropertyName) \\
-    GAMEPLAYATTRIBUTE_PROPERTY_GETTER(ClassName, PropertyName) \\
-    GAMEPLAYATTRIBUTE_VALUE_GETTER(PropertyName) \\
-    GAMEPLAYATTRIBUTE_VALUE_SETTER(PropertyName) \\
-    GAMEPLAYATTRIBUTE_VALUE_INITTER(PropertyName)
+    static_func_decl = (
+        "    UFUNCTION(BlueprintPure, Category=\"Attributes\")\n"
+        "    static AllAttributesEnum AttributeToEnum(const FGameplayAttribute& Attribute);\n\n"
+    )
 
-UCLASS()
-class {api_macro} {class_name_u} : public {base_class_u}
-{{
-    GENERATED_BODY()
+    header = (
+        "#pragma once\n\n"
+        "#include \"CoreMinimal.h\"\n"
+        f"#include \"{include_name}.h\"\n"
+        "#include \"AbilitySystemComponent.h\"\n"
+        "#include \"GameplayEffectExtension.h\"\n"
+        f"#include \"{class_name}.generated.h\"\n\n"
+        f"{enum_code}"
+        "#define ATTRIBUTE_ACCESSORS(ClassName, PropertyName) \\\n"
+        "    GAMEPLAYATTRIBUTE_PROPERTY_GETTER(ClassName, PropertyName) \\\n"
+        "    GAMEPLAYATTRIBUTE_VALUE_GETTER(PropertyName) \\\n"
+        "    GAMEPLAYATTRIBUTE_VALUE_SETTER(PropertyName) \\\n"
+        "    GAMEPLAYATTRIBUTE_VALUE_INITTER(PropertyName)\n\n"
+    )
 
-public:
-    {class_name_u}();
+    # --- Delegate declarations (one per attribute) ---
+    for attr in attributes:
+        aid = to_identifier_local(attr)
+        header += (
+            "DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams("
+            f"FOn{aid}Changed, float, OldValue, float, NewValue);\n"
+        )
+    header += "\n"
 
-'''
+    header += (
+        "UCLASS()\n"
+        f"class {api_macro} {class_name_u} : public {base_class_u}\n"
+        "{\n"
+        "    GENERATED_BODY()\n\n"
+        "public:\n"
+        f"    {class_name_u}();\n\n"
+        f"{static_func_decl}"
+        "    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;\n\n"
+        "    // Fires on server and locally-authoritative changes (GameplayEffects, SetBaseValue, etc.)\n"
+        "    virtual void PostAttributeChange(const FGameplayAttribute& Attribute, float OldValue, float NewValue) override;\n\n"
+        "public:\n\n"
+    )
+
+    # --- Attributes + Accessors ---
+    for attr in attributes:
+        aid = to_identifier_local(attr)
+        if attr in replicated:
+            header += (
+                "    UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_"
+                f"{aid}, Category = \"Attributes\")\n"
+                f"    FGameplayAttributeData {aid};\n"
+                f"    ATTRIBUTE_ACCESSORS({class_name_u}, {aid})\n\n"
+            )
+        else:
+            header += (
+                "    UPROPERTY(BlueprintReadOnly, Category = \"Attributes\")\n"
+                f"    FGameplayAttributeData {aid};\n"
+                f"    ATTRIBUTE_ACCESSORS({class_name_u}, {aid})\n\n"
+            )
+
+    # --- Events: delegate + BP event per attribute ---
+    header += "    // Per-attribute change events\n"
+    for attr in attributes:
+        aid = to_identifier_local(attr)
+        header += (
+            f"    UPROPERTY(BlueprintAssignable, Category=\"Attributes|Events\")\n"
+            f"    FOn{aid}Changed On{aid}Changed;\n\n"
+            f"    UFUNCTION(BlueprintImplementableEvent, Category=\"Attributes|Events\")\n"
+            f"    void BP_On{aid}Changed(float OldValue, float NewValue);\n\n"
+        )
+
+    # --- OnRep for replicated attributes ---
+    for attr in replicated:
+        aid = to_identifier_local(attr)
+        header += (
+            "    UFUNCTION()\n"
+            f"    void OnRep_{aid}(const FGameplayAttributeData& Old{aid});\n\n"
+        )
+
+    header += "};\n"
+
+    cpp = (
+        f"#include \"{header_file}\"\n"
+        "#include \"Net/UnrealNetwork.h\"\n"
+        "#include \"GameplayEffectExtension.h\"\n\n"
+        f"{class_name_u}::{class_name_u}()\n"
+        "{\n"
+        "}\n\n"
+        f"void {class_name_u}::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const\n"
+        "{\n"
+        "    Super::GetLifetimeReplicatedProps(OutLifetimeProps);\n"
+    )
+
+    for attr in replicated:
+        aid = to_identifier_local(attr)
+        cpp += (
+            f"    DOREPLIFETIME_CONDITION_NOTIFY({class_name_u}, {aid}, COND_None, REPNOTIFY_Always);\n"
+        )
+
+    cpp += "}\n\n"
+
+    # --- PostAttributeChange: fire per-attribute events on server/local changes ---
+    cpp += (
+        f"void {class_name_u}::PostAttributeChange(const FGameplayAttribute& Attribute, float OldValue, float NewValue)\n"
+        "{\n"
+        "    Super::PostAttributeChange(Attribute, OldValue, NewValue);\n\n"
+        "    if (OldValue == NewValue)\n"
+        "    {\n"
+        "        return;\n"
+        "    }\n\n"
+    )
 
     for attr in attributes:
-        id = to_identifier(attr)
-        if attr in replicated:
-            header += f'''    UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_{id}, Category = "Attributes")
-    FGameplayAttributeData {id};
-    ATTRIBUTE_ACCESSORS({class_name_u}, {id})
+        aid = to_identifier_local(attr)
+        cpp += (
+            f"    if (Attribute == Get{aid}Attribute())\n"
+            "    {\n"
+            f"        On{aid}Changed.Broadcast(OldValue, NewValue);\n"
+            f"        BP_On{aid}Changed(OldValue, NewValue);\n"
+            "        return;\n"
+            "    }\n\n"
+        )
 
-'''
-        else:
-            header += f'''    UPROPERTY(BlueprintReadOnly, Category = "Attributes")
-    FGameplayAttributeData {id};
-    ATTRIBUTE_ACCESSORS({class_name_u}, {id})
+    cpp += "}\n\n"
 
-'''
-
+    # --- OnRep: replicated attributes fire events on clients ---
     for attr in replicated:
-        id = to_identifier(attr)
-        header += f'''    UFUNCTION()
-    void OnRep_{id}(const FGameplayAttributeData& Old{id});
+        aid = to_identifier_local(attr)
+        cpp += (
+            f"void {class_name_u}::OnRep_{aid}(const FGameplayAttributeData& Old{aid})\n"
+            "{\n"
+            f"    GAMEPLAYATTRIBUTE_REPNOTIFY({class_name_u}, {aid}, Old{aid});\n"
+            f"    const float OldValue = Old{aid}.GetCurrentValue();\n"
+            f"    const float NewValue = {aid}.GetCurrentValue();\n"
+            "    if (OldValue != NewValue)\n"
+            "    {\n"
+            f"        On{aid}Changed.Broadcast(OldValue, NewValue);\n"
+            f"        BP_On{aid}Changed(OldValue, NewValue);\n"
+            "    }\n"
+            "}\n\n"
+        )
 
-'''
-
-    header += '''    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-};
-'''
-
-    cpp = f'''#include "{header_file}"
-#include "Net/UnrealNetwork.h"
-#include "GameplayEffectExtension.h"
-
-{class_name_u}::{class_name_u}()
-{{
-}}
-
-void {class_name_u}::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{{
-    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-'''
-
-    for attr in replicated:
-        id = to_identifier(attr)
-        cpp += f'    DOREPLIFETIME_CONDITION_NOTIFY({class_name_u}, {id}, COND_None, REPNOTIFY_Always);\n'
-
-    cpp += '}\n\n'
-
-    for attr in replicated:
-        id = to_identifier(attr)
-        cpp += f'''void {class_name_u}::OnRep_{id}(const FGameplayAttributeData& Old{id})
-{{
-    GAMEPLAYATTRIBUTE_REPNOTIFY({class_name_u}, {id}, Old{id});
-}}
-
-'''
+    # --- AttributeToEnum implementation ---
+    cpp += f"AllAttributesEnum {class_name_u}::AttributeToEnum(const FGameplayAttribute& Attribute)\n"
+    cpp += "{\n"
+    cpp += "    const FString AttributeName = Attribute.GetName();\n"
+    for value in enum_values:
+        cpp += f"    if (AttributeName == TEXT(\"{value}\")) return AllAttributesEnum::{value};\n"
+    cpp += "    return AllAttributesEnum::None;\n"
+    cpp += "}\n"
 
     with open(header_file, 'w', encoding='utf-8') as f:
         f.write(header)
     with open(cpp_file, 'w', encoding='utf-8') as f:
         f.write(cpp)
+
 
 class ToolTip:
     def __init__(self, widget, text):
